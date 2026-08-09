@@ -34,10 +34,10 @@ monitoring:
 notifications:
   telegram_enabled: true
   local_sound_enabled: true
-  repeat_after_seconds:
-    - 30
-    - 120
-  persistent_repeat_minutes: 10
+  # По умолчанию одно сообщение при появлении доступности на конкретную дату.
+  # Добавьте секунды/минуты только если нужны повторные напоминания.
+  repeat_after_seconds: []
+  persistent_repeat_minutes: 0
 
 safety:
   block_pause_minutes: 30

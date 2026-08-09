@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import html as html_module
 import json
 import logging
@@ -19,7 +20,7 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from app.configuration import Settings
+from app.configuration import RouteConfig, Settings
 from app.detector import DetectionResult, DetectionState, classify_html
 
 
@@ -858,6 +859,21 @@ class BrowserController:
             diagnostic_file=diagnostic,
             duration_seconds=time.monotonic() - started,
         )
+
+    def check_date_for_route(
+        self,
+        route: RouteConfig,
+        outbound: date,
+        *,
+        refresh_page: bool = True,
+    ) -> BrowserCheck:
+        """Проверяет временное направление и всегда восстанавливает настройки."""
+        original_settings = self.settings
+        self.settings = dataclasses.replace(original_settings, route=route)
+        try:
+            return self.check_date(outbound, refresh_page=refresh_page)
+        finally:
+            self.settings = original_settings
 
     def screenshot(self, label: str) -> Path | None:
         if not self.page or self.page.is_closed():

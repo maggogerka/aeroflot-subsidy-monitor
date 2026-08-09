@@ -38,6 +38,8 @@ def test_valid_configuration(tmp_path, monkeypatch):
         "2026-08-29",
         "2026-08-28",
     ]
+    assert settings.notifications.repeat_after_seconds == ()
+    assert settings.notifications.persistent_repeat_minutes == 0
 
 
 def test_return_date_is_optional(tmp_path, monkeypatch):

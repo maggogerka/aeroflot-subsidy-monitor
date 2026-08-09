@@ -91,4 +91,27 @@ def test_round_trip_alert_does_not_claim_return_availability():
     message = format_available_message(settings, date(2026, 9, 3), "7 400 ₽")
 
     assert "НАЙДЕН СУБСИДИРОВАННЫЙ ТАРИФ" in message
-    assert "наличие обратного рейса проверьте вручную" in message
+    assert "обратное направление проверяется отдельно" in message
+
+
+def test_disabled_reminders_send_only_one_message(monkeypatch):
+    notifier = FakeNotifier()
+    manager = AlertManager(
+        notifier,
+        repeat_after_seconds=(),
+        persistent_repeat_minutes=0,
+        logger=logging.getLogger("test"),
+    )
+    monkeypatch.setattr(
+        "app.notifier.threading.Thread",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("repeat thread must not start")
+        ),
+    )
+
+    payload = AlertPayload(date(2026, 9, 3), "found", None)
+    manager.activate("2026-09-03", payload, initial=True)
+    manager.activate("2026-09-03", payload, initial=True)
+
+    assert len(notifier.calls) == 1
+    manager.deactivate_all()

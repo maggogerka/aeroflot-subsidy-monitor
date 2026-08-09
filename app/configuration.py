@@ -69,8 +69,8 @@ class MonitoringConfig:
 class NotificationConfig:
     telegram_enabled: bool = True
     local_sound_enabled: bool = True
-    repeat_after_seconds: tuple[int, ...] = (30, 120)
-    persistent_repeat_minutes: int = 10
+    repeat_after_seconds: tuple[int, ...] = ()
+    persistent_repeat_minutes: int = 0
 
 
 @dataclass(frozen=True)
@@ -346,7 +346,7 @@ def load_settings(
             "monitoring.refresh_mode: допустимо только 'cycle' или 'date'."
         )
 
-    repeats = notifications_raw.get("repeat_after_seconds", [30, 120])
+    repeats = notifications_raw.get("repeat_after_seconds", [])
     if not isinstance(repeats, list):
         raise ConfigurationError("notifications.repeat_after_seconds должен быть списком.")
     notifications = NotificationConfig(
@@ -356,8 +356,9 @@ def load_settings(
             _positive(v, "notifications.repeat_after_seconds") for v in repeats
         ),
         persistent_repeat_minutes=_positive(
-            notifications_raw.get("persistent_repeat_minutes", 10),
+            notifications_raw.get("persistent_repeat_minutes", 0),
             "notifications.persistent_repeat_minutes",
+            allow_zero=True,
         ),
     )
     safety = SafetyConfig(

@@ -109,7 +109,7 @@ class AlertPayload:
 
 
 class AlertManager:
-    """Один поток повторных Telegram-напоминаний на каждую доступную дату."""
+    """Одно оповещение на дату с необязательными напоминаниями."""
 
     def __init__(
         self,
@@ -140,13 +140,14 @@ class AlertManager:
         # При первом AVAILABLE в текущем процессе сообщение отправляется всегда.
         # Это защищает от пропуска после перезапуска со старым state-файлом.
         self._safe_send(payload.text, payload.screenshot, button=True)
-        thread = threading.Thread(
-            target=self._repeat_loop,
-            args=(key, stop, True),
-            name=f"telegram-alert-{key}",
-            daemon=True,
-        )
-        thread.start()
+        if self.repeat_after_seconds or self.persistent_seconds > 0:
+            thread = threading.Thread(
+                target=self._repeat_loop,
+                args=(key, stop, True),
+                name=f"telegram-alert-{key}",
+                daemon=True,
+            )
+            thread.start()
         return True
 
     def deactivate(self, key: str) -> None:
@@ -184,6 +185,8 @@ class AlertManager:
                     button=True,
                 )
                 previous = absolute_delay
+        if self.persistent_seconds <= 0:
+            return
         while not stop.wait(self.persistent_seconds):
             payload = self._payload(key)
             if not payload:
@@ -315,7 +318,7 @@ def format_available_message(
             f"Обратно: {settings.route.return_date.day} "
             f"{MONTHS_RU[settings.route.return_date.month]} "
             f"{settings.route.return_date.year} "
-            "(задано в поиске; наличие обратного рейса проверьте вручную)\n"
+            "(обратное направление проверяется отдельно)\n"
         )
     passengers = ", ".join(
         f"{item.label}: {item.count}" for item in settings.route.passengers

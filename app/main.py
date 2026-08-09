@@ -7,11 +7,12 @@ import os
 import random
 import sys
 import time
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from app.browser import BrowserCheck, BrowserController
-from app.configuration import ConfigurationError, Settings, load_settings
+from app.configuration import ConfigurationError, RouteConfig, Settings, load_settings
 from app.detector import DetectionState
 from app.logging_setup import configure_logging
 from app.notifier import (
@@ -154,6 +155,53 @@ def dates_for_cycle(settings: Settings, cycle: int) -> list[date]:
     return list(settings.route.check_dates)
 
 
+@dataclass(frozen=True)
+class CheckRequest:
+    route: RouteConfig
+    travel_date: date
+    refresh_page: bool
+    leg: str
+
+
+def return_leg_route(route: RouteConfig) -> RouteConfig | None:
+    """Создаёт независимый поиск обратного направления без оформления билета."""
+    if route.trip_type != "round_trip" or route.return_date is None:
+        return None
+    return replace(
+        route,
+        origin=route.destination,
+        destination=route.origin,
+        check_dates=(route.return_date,),
+        trip_type="one_way",
+        return_date=None,
+    )
+
+
+def checks_for_cycle(settings: Settings) -> list[CheckRequest]:
+    checks = [
+        CheckRequest(
+            route=settings.route,
+            travel_date=travel_date,
+            refresh_page=(
+                settings.monitoring.refresh_mode == "date" or index == 0
+            ),
+            leg="outbound",
+        )
+        for index, travel_date in enumerate(settings.route.check_dates)
+    ]
+    reverse = return_leg_route(settings.route)
+    if reverse is not None:
+        checks.append(
+            CheckRequest(
+                route=reverse,
+                travel_date=reverse.check_dates[0],
+                refresh_page=True,
+                leg="return",
+            )
+        )
+    return checks
+
+
 def route_check_key(settings: Settings, outbound: date) -> str:
     return "|".join(
         (
@@ -292,26 +340,39 @@ def run_monitor(
                 state.cycle += 1
                 store.save(state)
                 cycle_dates = dates_for_cycle(settings, state.cycle)
+                cycle_checks = checks_for_cycle(settings)
                 logger.info(
-                    "Цикл %d: последовательная проверка %s",
+                    "Цикл %d: даты туда %s%s",
                     state.cycle,
                     ", ".join(item.isoformat() for item in cycle_dates),
+                    (
+                        f"; обратно {settings.route.destination} → "
+                        f"{settings.route.origin} "
+                        f"{settings.route.return_date}"
+                        if settings.route.return_date is not None
+                        else ""
+                    ),
                 )
                 block_cycle = False
                 successful_this_cycle = False
-                for index, outbound in enumerate(cycle_dates):
-                    # В режиме cycle форма заполняется один раз, затем даты
-                    # переключаются в ленте. Режим date обновляет форму всегда.
-                    refresh_page = (
-                        settings.monitoring.refresh_mode == "date"
-                        or index == 0
-                    )
-                    check = browser.check_date(
-                        outbound, refresh_page=refresh_page
+                for index, request in enumerate(cycle_checks):
+                    leg_settings = replace(settings, route=request.route)
+                    if request.leg == "return":
+                        logger.info(
+                            "Отдельная проверка обратного направления %s → %s "
+                            "на %s (не зависит от результата рейса туда)",
+                            request.route.origin,
+                            request.route.destination,
+                            request.travel_date,
+                        )
+                    check = browser.check_date_for_route(
+                        request.route,
+                        request.travel_date,
+                        refresh_page=request.refresh_page,
                     )
                     process_check(
-                        settings,
-                        outbound,
+                        leg_settings,
+                        request.travel_date,
                         check,
                         state,
                         store,
@@ -335,15 +396,19 @@ def run_monitor(
                         )
                         delay = settings.monitoring.unknown_retry_seconds * factor
                         logger.warning(
-                            "UNKNOWN для %s; повтор через %d секунд", outbound, delay
+                            "UNKNOWN для %s; повтор через %d секунд",
+                            request.travel_date,
+                            delay,
                         )
                         time.sleep(delay)
-                        retry = browser.check_date(
-                            outbound, refresh_page=refresh_page
+                        retry = browser.check_date_for_route(
+                            request.route,
+                            request.travel_date,
+                            refresh_page=request.refresh_page,
                         )
                         process_check(
-                            settings,
-                            outbound,
+                            leg_settings,
+                            request.travel_date,
                             retry,
                             state,
                             store,
@@ -383,7 +448,7 @@ def run_monitor(
                         logger.warning("Сетевой backoff: %d секунд", backoff)
                         time.sleep(backoff)
 
-                    if index < len(cycle_dates) - 1 and not block_cycle:
+                    if index < len(cycle_checks) - 1 and not block_cycle:
                         delay = random.randint(
                             settings.monitoring.min_date_delay_seconds,
                             settings.monitoring.max_date_delay_seconds,

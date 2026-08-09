@@ -16,13 +16,13 @@ alarm continues until it is acknowledged manually.
 
 - any subsidy programme offered by the form;
 - any route currently accepted by the website;
-- one-way searches or searches with a configured return date;
+- one-way searches or independent checks of both round-trip directions;
 - an ordered list of dates, including repeated high-priority dates;
 - configurable passenger labels and counts;
 - configurable cabin class;
 - per-cycle or per-date full page refresh;
 - conservative `AVAILABLE / UNAVAILABLE / UNKNOWN` classification;
-- immediate Telegram alerts with retries and recurring reminders;
+- one Telegram alert per date and direction, with optional reminders;
 - a persistent local alarm that requires manual acknowledgement;
 - a persistent Chromium profile for cookies and manual CAPTCHA handling;
 - logs, heartbeat messages, redacted diagnostics, and atomic state storage;
@@ -94,13 +94,12 @@ trip_type: "round_trip"
 return_date: "2026-09-07"
 ```
 
-The return date must not be earlier than any outbound date. Aeroflot currently
-shows return-flight results only after an outbound fare is selected and the user
-clicks a legal confirmation labelled `Продолжить`. The monitor deliberately
-does not perform that action. Consequently, `AVAILABLE` for a round-trip search
-means that a subsidized outbound fare was found and the return date was accepted
-by the search form; return-flight availability must be confirmed manually. The
-Telegram alert states this explicitly.
+The return date must not be earlier than any outbound date. After checking every
+outbound date, the monitor always runs a separate fresh search with the cities
+reversed, for example `Владивосток → Москва` on the return date. This check runs
+even when every outbound result is `UNAVAILABLE`. Both directions are therefore
+observed without selecting a fare or clicking Aeroflot's legal confirmation
+labelled `Продолжить`.
 
 ### Refresh and date order
 
@@ -139,8 +138,10 @@ To obtain `TELEGRAM_CHAT_ID`:
 .\.venv\Scripts\python.exe -m app.main --test-alert
 ```
 
-When an `AVAILABLE` result is confirmed, Telegram delivery starts immediately.
-Temporary failures are retried, followed by reminders configured in
+When an `AVAILABLE` result is confirmed, one message is sent for that date and
+direction, regardless of how many matching flights appear. Temporary delivery
+failures are retried. Recurring reminders are disabled by default and can be
+enabled with `repeat_after_seconds` and `persistent_repeat_minutes` in
 `config.yaml`. Delivery cannot be guaranteed while the computer is off or has
 no power or internet access.
 
