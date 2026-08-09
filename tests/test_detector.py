@@ -32,6 +32,35 @@ def test_real_subsidized_card_is_available():
     assert result.price == "7 400 ₽"
 
 
+def test_current_price_only_button_is_available():
+    result = classify_html(
+        (FIXTURES / "available_price_button.html").read_text(encoding="utf-8"),
+        OUTBOUND,
+        RETURN,
+        "Москва",
+        "Владивосток",
+        1,
+        selected_date_confirmed=True,
+    )
+    assert result.state == DetectionState.AVAILABLE
+    assert result.price == "7 400 ₽"
+    assert "subsidy_page_context" in result.signals
+
+
+def test_calendar_button_with_date_and_price_is_not_a_flight_action():
+    html = """
+    <header>Субсидированные рейсы</header>
+    <div>Москва Владивосток 29 августа 2026 7 сентября 2026</div>
+    <div aria-label="Лента соседних дат">
+      <button>29 августа, сб от 7 400 ₽</button>
+    </div>
+    """
+    result = classify_html(
+        html, OUTBOUND, RETURN, "Москва", "Владивосток", 1
+    )
+    assert result.state == DetectionState.UNKNOWN
+
+
 def test_calendar_price_does_not_create_false_positive():
     assert detect("calendar_price_only.html").state == DetectionState.UNAVAILABLE
 

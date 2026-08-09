@@ -117,6 +117,10 @@ SUBSIDY_PAGE_RE = re.compile(
 ACTION_RE = re.compile(
     r"выбрать|продолжить|далее|к выбору|оформить", re.IGNORECASE
 )
+FLIGHT_CONTEXT_RE = re.compile(
+    r"\b(?:в пути|о рейсе|время вылета)\b|\b[A-ZА-ЯЁ]{2}\s*\d{3,4}\b",
+    re.IGNORECASE,
+)
 
 
 def _normalized(value: str) -> str:
@@ -155,6 +159,21 @@ def _contains_date(text: str, value: date) -> bool:
     return any(variant.lower() in lowered for variant in _date_variants(value))
 
 
+def _is_action_element(node: _Node) -> bool:
+    """Цена на текущем сайте сама является кнопкой выбора тарифа."""
+    role = node.attrs.get("role", "").lower()
+    if node.tag != "button" and role != "button":
+        return False
+    text = node.text().strip()
+    return bool(ACTION_RE.search(text) or PRICE_RE.fullmatch(text))
+
+
+def _contains_action(node: _Node) -> bool:
+    if _is_action_element(node):
+        return True
+    return any(_contains_action(child) for child in node.children)
+
+
 def _candidate_nodes(root: _Node) -> list[_Node]:
     result: list[_Node] = []
 
@@ -188,21 +207,21 @@ def _candidate_nodes(root: _Node) -> list[_Node]:
 
     candidates = [node for node in result if not has_semantic_descendant(node)]
 
-    # Если сайт не назначил карточке semantic role, идём от обычной кнопки
-    # «Выбрать/Продолжить» к ближайшему контейнеру с ценой. Это опирается на
-    # смысл элементов, а не на генерируемые CSS-классы.
+    # Если сайт не назначил карточке semantic role, идём от кнопки действия к
+    # ближайшему контейнеру с ценой и признаками рейса. В актуальном интерфейсе
+    # синяя кнопка содержит только «7 400 ₽», без слова «Выбрать».
     def walk_actions(node: _Node) -> None:
-        role = node.attrs.get("role", "").lower()
-        if (
-            (node.tag == "button" or role == "button")
-            and ACTION_RE.search(node.text())
-        ):
+        if _is_action_element(node):
             ancestor: _Node | None = node
-            for _ in range(7):
+            for _ in range(9):
                 if ancestor is None:
                     break
                 text = ancestor.text()
-                if PRICE_RE.search(text) and len(text) >= 20:
+                if (
+                    PRICE_RE.search(text)
+                    and len(text) >= 20
+                    and FLIGHT_CONTEXT_RE.search(text)
+                ):
                     candidates.append(ancestor)
                     break
                 ancestor = ancestor.parent
@@ -271,10 +290,11 @@ def classify_html(
         normalized = _normalized(text)
         price = PRICE_RE.search(text)
         subsidy = SUBSIDY_RE.search(text)
-        action = ACTION_RE.search(text)
+        action = _contains_action(node)
         direction = (
             _normalized(origin) in normalized and _normalized(destination) in normalized
         )
+        flight_context = bool(direction or FLIGHT_CONTEXT_RE.search(text))
         # Дата должна находиться в самой карточке. Наличие даты только в верхней
         # календарной ленте недостаточно.
         outbound_ok = (
@@ -289,6 +309,7 @@ def classify_html(
             price
             and (subsidy or SUBSIDY_PAGE_RE.search(full_text_original))
             and action
+            and flight_context
             and (direction or page_route)
             and outbound_ok
             and page_return
@@ -298,6 +319,7 @@ def classify_html(
                 "result_card",
                 "price_in_card",
                 "continuation_action",
+                "flight_context",
                 "route_confirmed",
                 "outbound_date_confirmed",
                 f"passengers:{passenger_count}",
@@ -308,7 +330,7 @@ def classify_html(
                 else "subsidy_page_context"
             )
             if return_date is not None:
-                signals.append("return_date_confirmed")
+                signals.append("return_date_in_search_context")
             return DetectionResult(
                 DetectionState.AVAILABLE,
                 tuple(signals),

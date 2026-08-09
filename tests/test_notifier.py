@@ -1,10 +1,12 @@
 import logging
 from datetime import date
+from types import SimpleNamespace
 
 from app.notifier import (
     AlertManager,
     AlertPayload,
     NotificationError,
+    format_available_message,
 )
 
 
@@ -73,3 +75,20 @@ def test_telegram_alert_retries_temporary_failure(monkeypatch):
     manager.activate("2026-08-29", payload, initial=True)
     manager.deactivate_all()
     assert len(notifier.calls) == 2
+
+
+def test_round_trip_alert_does_not_claim_return_availability():
+    settings = SimpleNamespace(
+        route=SimpleNamespace(
+            return_date=date(2026, 9, 7),
+            subsidy_program="Молодёжь и пенсионеры",
+            origin="Москва",
+            destination="Владивосток",
+            passengers=[SimpleNamespace(label="Молодёжь", count=1)],
+        )
+    )
+
+    message = format_available_message(settings, date(2026, 9, 3), "7 400 ₽")
+
+    assert "НАЙДЕН СУБСИДИРОВАННЫЙ ТАРИФ" in message
+    assert "наличие обратного рейса проверьте вручную" in message

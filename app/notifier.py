@@ -314,13 +314,14 @@ def format_available_message(
         return_line = (
             f"Обратно: {settings.route.return_date.day} "
             f"{MONTHS_RU[settings.route.return_date.month]} "
-            f"{settings.route.return_date.year}\n"
+            f"{settings.route.return_date.year} "
+            "(задано в поиске; наличие обратного рейса проверьте вручную)\n"
         )
     passengers = ", ".join(
         f"{item.label}: {item.count}" for item in settings.route.passengers
     )
     return (
-        "🔥 НАЙДЕН СУБСИДИРОВАННЫЙ БИЛЕТ\n\n"
+        "🔥 НАЙДЕН СУБСИДИРОВАННЫЙ ТАРИФ\n\n"
         f"Программа: {settings.route.subsidy_program}\n"
         f"{settings.route.origin} → {settings.route.destination}\n"
         f"Вылет: {outbound.day} {MONTHS_RU[outbound.month]} {outbound.year}\n"

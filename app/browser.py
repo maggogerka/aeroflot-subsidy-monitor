@@ -602,6 +602,9 @@ class BrowserController:
         # Сначала используем семантическую кнопку в ленте дат/календаре.
         candidate = self._first_visible(self.page.get_by_role("button", name=pattern))
         if candidate:
+            if not candidate.is_enabled():
+                self.logger.debug("Карточка даты %s недоступна для нажатия", outbound)
+                return False
             selected = (
                 candidate.get_attribute("aria-selected") == "true"
                 or candidate.get_attribute("aria-pressed") == "true"
@@ -670,6 +673,46 @@ class BrowserController:
                 return True
         return False
 
+    def _date_card_has_no_flights(self, outbound: date) -> bool:
+        """Проверяет именно карточку нужной даты, не соседние даты ленты."""
+        assert self.page
+        date_pattern = self._date_pattern(outbound)
+        no_flights = re.compile(r"\bрейсов\s+нет\b", re.IGNORECASE)
+        sources = (
+            self.page.get_by_role("button", name=date_pattern),
+            self.page.get_by_text(date_pattern),
+        )
+        for source in sources:
+            try:
+                for index in range(min(source.count(), 30)):
+                    node = source.nth(index)
+                    if not node.is_visible():
+                        continue
+                    node_text = " ".join(node.inner_text().split())
+                    if (
+                        date_pattern.search(node_text)
+                        and not node.is_enabled()
+                    ):
+                        return True
+                    current = node
+                    # Самая маленькая карточка содержит дату и подпись
+                    # «Рейсов нет». До общего контейнера всей ленты не доходим.
+                    for _ in range(5):
+                        text = " ".join(current.inner_text().split())
+                        if (
+                            len(text) <= 240
+                            and date_pattern.search(text)
+                            and no_flights.search(text)
+                        ):
+                            return True
+                        current = current.locator("..")
+            except Exception:
+                self.logger.debug(
+                    "Не удалось проверить карточку даты %s", outbound,
+                    exc_info=True,
+                )
+        return False
+
     def _click_search_if_available(self) -> bool:
         assert self.page
         button = self._first_visible(
@@ -706,6 +749,13 @@ class BrowserController:
             )
             if last.state != DetectionState.UNKNOWN:
                 return last
+            if self._date_card_has_no_flights(outbound):
+                self.last_selected_date = outbound
+                self.logger.info("Для даты %s карточка сообщает «Рейсов нет»", outbound)
+                return DetectionResult(
+                    DetectionState.UNAVAILABLE,
+                    ("date_card:no_flights",),
+                )
             self.page.wait_for_timeout(1_000)
         return last
 
@@ -747,11 +797,31 @@ class BrowserController:
                     )
                 else:
                     result = self._wait_for_result(outbound)
-            elif not self._select_date(outbound):
-                result = DetectionResult(
-                    DetectionState.UNKNOWN,
-                    ("locator_missing:outbound_date_in_results",),
+            elif self._date_card_has_no_flights(outbound):
+                self.last_selected_date = outbound
+                self.logger.info(
+                    "Дата %s недоступна: в карточке указано «Рейсов нет»",
+                    outbound,
                 )
+                result = DetectionResult(
+                    DetectionState.UNAVAILABLE,
+                    ("date_card:no_flights",),
+                )
+            elif not self._select_date(outbound):
+                # Дата может быть за стрелкой текущего диапазона ленты. Вместо
+                # UNKNOWN выполняем надёжный свежий поиск через исходную форму.
+                self.logger.info(
+                    "Дата %s отсутствует в видимой ленте; выполняем свежий поиск",
+                    outbound,
+                )
+                self._refresh_search_form(outbound)
+                if not self._recover_search_context(outbound):
+                    result = DetectionResult(
+                        DetectionState.UNKNOWN,
+                        ("fallback_search_form_not_completed",),
+                    )
+                else:
+                    result = self._wait_for_result(outbound)
             else:
                 # Смена карточки запускает новый запрос внутри SPA. Небольшая
                 # задержка не даёт классификатору прочитать старый результат.
