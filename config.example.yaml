@@ -1,0 +1,51 @@
+route:
+  # Точное название из списка «Программа субсидирования» на сайте.
+  subsidy_program: "Молодёжь и пенсионеры"
+  origin: "Москва"
+  destination: "Владивосток"
+
+  # Порядок проверки. Даты можно повторять, например для приоритета.
+  check_dates:
+    - "2026-08-29"
+    - "2026-08-30"
+    - "2026-08-29"
+
+  # one_way — без обратного билета; round_trip — с обратной датой.
+  trip_type: "one_way"
+  return_date: null
+  cabin: "Эконом"
+
+  # Ключи — точные названия строк в окне пассажиров на сайте.
+  passengers:
+    "Молодёжь": 1
+
+monitoring:
+  # cycle: обновить/заполнить один раз, затем листать даты.
+  # date: заново обновлять и заполнять форму перед каждой датой.
+  refresh_mode: "cycle"
+  min_cycle_delay_seconds: 240
+  max_cycle_delay_seconds: 420
+  min_date_delay_seconds: 8
+  max_date_delay_seconds: 20
+  unknown_retry_seconds: 90
+  heartbeat_hours: 6
+  stale_monitor_minutes: 20
+
+notifications:
+  telegram_enabled: true
+  local_sound_enabled: true
+  repeat_after_seconds:
+    - 30
+    - 120
+  persistent_repeat_minutes: 10
+
+safety:
+  block_pause_minutes: 30
+  max_consecutive_errors: 3
+  save_unknown_html: true
+  artifact_retention_days: 14
+
+browser:
+  search_url: "https://www.aeroflot.ru/ru-ru/pbsa/search#/search"
+  timeout_seconds: 45
+  slow_mo_ms: 150

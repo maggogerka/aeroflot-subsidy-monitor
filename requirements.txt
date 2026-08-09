@@ -1,0 +1,5 @@
+playwright>=1.50,<2
+python-dotenv>=1.0,<2
+PyYAML>=6.0,<7
+requests>=2.32,<3
+pytest>=8.0,<10
