@@ -221,3 +221,66 @@ def test_date_outside_visible_strip_uses_fresh_search(monkeypatch):
 
     assert check.result.state == DetectionState.UNAVAILABLE
     assert calls == ["reuse", "missing", "refresh", "refill", "result"]
+
+
+def test_virtualized_dropdown_scrolls_until_option_appears(monkeypatch):
+    class FakeField:
+        def get_attribute(self, name):
+            return "readonly"
+
+    class FakeOption:
+        clicked = False
+
+        def click(self):
+            self.clicked = True
+
+    controller = object.__new__(BrowserController)
+    controller.logger = logging.getLogger("test")
+    controller.page = SimpleNamespace(wait_for_timeout=lambda milliseconds: None)
+    option = FakeOption()
+    found = iter((None, None, option))
+    scrolls: list[bool] = []
+    controller._find_dropdown_option = lambda field, value: next(found)
+    controller._scroll_dropdown_near_field = lambda field: (
+        scrolls.append(True) or True
+    )
+
+    method = controller._select_open_dropdown_value(FakeField(), "Якутск")
+
+    assert method == "dropdown scroll"
+    assert option.clicked
+    assert scrolls == [True]
+
+
+def test_searchable_dropdown_filters_before_scrolling():
+    class FakeField:
+        filled: list[str] = []
+
+        def get_attribute(self, name):
+            return None
+
+        def fill(self, value):
+            self.filled.append(value)
+
+    class FakeOption:
+        clicked = False
+
+        def click(self):
+            self.clicked = True
+
+    controller = object.__new__(BrowserController)
+    controller.logger = logging.getLogger("test")
+    controller.page = SimpleNamespace(wait_for_timeout=lambda milliseconds: None)
+    option = FakeOption()
+    found = iter((None, option))
+    controller._find_dropdown_option = lambda field, value: next(found)
+    controller._scroll_dropdown_near_field = lambda field: (
+        (_ for _ in ()).throw(AssertionError("scroll must not be used"))
+    )
+    field = FakeField()
+
+    method = controller._select_open_dropdown_value(field, "Якутск")
+
+    assert method == "text filter"
+    assert field.filled == ["Якутск"]
+    assert option.clicked

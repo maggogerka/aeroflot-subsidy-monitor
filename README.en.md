@@ -16,6 +16,7 @@ alarm continues until it is acknowledged manually.
 
 - any subsidy programme offered by the form;
 - any route currently accepted by the website;
+- filtering and scrolling for virtualized programme and city lists;
 - one-way searches or independent checks of both round-trip directions;
 - an ordered list of dates, including repeated high-priority dates;
 - configurable passenger labels and counts;
@@ -84,6 +85,8 @@ route:
 The programme, cabin, city, and passenger values must match the visible Russian
 labels on the site. Differences between `е` and `ё` are handled automatically.
 Multiple passenger categories can be configured as separate mapping entries.
+For long lists, the monitor first filters by the entered value and then falls
+back to scrolling the open virtualized list until it finds an exact match.
 
 ### Round trips
 

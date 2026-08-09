@@ -273,6 +273,162 @@ class BrowserController:
         except Exception:
             self.logger.debug("Не удалось закрыть баннер cookies", exc_info=True)
 
+    def _find_dropdown_option(self, field: Locator, value: str) -> Locator | None:
+        """Находит ближайший точный пункт открытого списка, не соседнее поле."""
+        assert self.page
+        pattern = self._exact_text_pattern(value)
+        option = self._first_visible(
+            self.page.get_by_role("option", name=pattern)
+        )
+        if option is not None:
+            return option
+
+        try:
+            field_box = field.bounding_box()
+            matches = self.page.get_by_text(pattern)
+            candidates: list[tuple[float, Locator]] = []
+            for index in range(min(matches.count(), 80)):
+                item = matches.nth(index)
+                if not item.is_visible():
+                    continue
+                box = item.bounding_box()
+                if not box:
+                    continue
+                if field_box:
+                    field_bottom = field_box["y"] + field_box["height"]
+                    # Не принимаем текст соседнего уже заполненного поля за
+                    # пункт выпадающего списка.
+                    if box["y"] < field_bottom - 4:
+                        continue
+                    score = abs(box["y"] - field_bottom) + abs(
+                        box["x"] - field_box["x"]
+                    ) * 0.1
+                else:
+                    score = box["y"]
+                candidates.append((score, item))
+            if candidates:
+                return min(candidates, key=lambda candidate: candidate[0])[1]
+        except Exception:
+            self.logger.debug(
+                "Не удалось найти пункт %r в открытом списке", value,
+                exc_info=True,
+            )
+        return None
+
+    @staticmethod
+    def _scroll_dropdown_near_field(field: Locator) -> bool:
+        """Прокручивает ближайший к полю видимый виртуализированный список."""
+        try:
+            result = field.evaluate(
+                """field => {
+                    const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = getComputedStyle(element);
+                        return rect.width >= 120 && rect.height >= 50 &&
+                            style.display !== 'none' && style.visibility !== 'hidden';
+                    };
+                    const scrollable = element => {
+                        if (!element || element === document.body ||
+                                element === document.documentElement || !visible(element)) {
+                            return false;
+                        }
+                        const style = getComputedStyle(element);
+                        return element.scrollHeight > element.clientHeight + 4 &&
+                            ['auto', 'scroll'].includes(style.overflowY);
+                    };
+                    const rect = field.getBoundingClientRect();
+                    const points = [
+                        [rect.left + Math.min(30, rect.width / 2), rect.bottom + 24],
+                        [rect.left + rect.width / 2, rect.bottom + 80],
+                        [rect.left + Math.min(30, rect.width / 2), rect.top - 24],
+                    ];
+                    const candidates = [];
+                    for (const [x, y] of points) {
+                        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+                        let node = document.elementFromPoint(x, y);
+                        while (node && node !== document.body) {
+                            if (scrollable(node) && !candidates.includes(node)) {
+                                candidates.push(node);
+                            }
+                            node = node.parentElement;
+                        }
+                    }
+                    if (!candidates.length) {
+                        for (const node of document.querySelectorAll('body *')) {
+                            if (!scrollable(node)) continue;
+                            const box = node.getBoundingClientRect();
+                            const horizontallyNear = box.right >= rect.left &&
+                                box.left <= rect.right + 400;
+                            const verticallyNear = box.top >= rect.top - 100 &&
+                                box.top <= rect.bottom + 150;
+                            if (horizontallyNear && verticallyNear) candidates.push(node);
+                        }
+                    }
+                    if (!candidates.length) return false;
+                    candidates.sort((left, right) => {
+                        const a = left.getBoundingClientRect();
+                        const b = right.getBoundingClientRect();
+                        return Math.abs(a.top - rect.bottom) - Math.abs(b.top - rect.bottom);
+                    });
+                    const target = candidates[0];
+                    const before = target.scrollTop;
+                    const step = Math.max(80, Math.floor(target.clientHeight * 0.75));
+                    target.scrollTop = Math.min(
+                        target.scrollHeight - target.clientHeight,
+                        before + step
+                    );
+                    target.dispatchEvent(new Event('scroll', {bubbles: true}));
+                    return target.scrollTop > before;
+                }"""
+            )
+            return bool(result)
+        except Exception:
+            return False
+
+    def _select_open_dropdown_value(
+        self, field: Locator, value: str
+    ) -> str | None:
+        """Выбирает значение напрямую, через фильтр или прокрутку списка."""
+        assert self.page
+        option = self._find_dropdown_option(field, value)
+        if option is not None:
+            option.click()
+            return "visible option"
+
+        # Большинство текущих Ant Design select поддерживает ввод и фильтрацию.
+        try:
+            if field.get_attribute("readonly") is None:
+                field.fill(value)
+                self.page.wait_for_timeout(450)
+                option = self._find_dropdown_option(field, value)
+                if option is not None:
+                    option.click()
+                    return "text filter"
+        except Exception:
+            self.logger.debug(
+                "Поле не поддерживает фильтрацию для значения %r", value,
+                exc_info=True,
+            )
+
+        # Если фильтр не поддерживается или ничего не нашёл, возвращаем полный
+        # список и прокручиваем виртуальный контейнер до нужного элемента.
+        try:
+            if field.get_attribute("readonly") is None:
+                field.fill("")
+                field.click()
+                self.page.wait_for_timeout(300)
+        except Exception:
+            pass
+        for _ in range(30):
+            option = self._find_dropdown_option(field, value)
+            if option is not None:
+                option.click()
+                return "dropdown scroll"
+            if not self._scroll_dropdown_near_field(field):
+                break
+            self.page.wait_for_timeout(180)
+        return None
+
     def _choose_form_value(self, placeholder: str, value: str) -> bool:
         assert self.page
         field = self._first_visible(
@@ -289,12 +445,17 @@ class BrowserController:
             pass
         field.click()
         self.page.wait_for_timeout(500)
-        option = self._first_visible(
-            self.page.get_by_text(self._exact_text_pattern(value))
-        )
-        if option is None:
+        method = self._select_open_dropdown_value(field, value)
+        if method is None:
+            self.logger.warning(
+                "В поле %r не найдено значение %r даже после фильтрации и прокрутки",
+                placeholder,
+                value,
+            )
             return False
-        option.click()
+        self.logger.info(
+            "Поле %r: значение %r выбрано (%s)", placeholder, value, method
+        )
         self.page.wait_for_timeout(900)
         try:
             return self._normalize_text(
